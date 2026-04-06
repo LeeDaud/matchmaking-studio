@@ -2,6 +2,8 @@ import { createClient as createSupabaseClient, createServiceRoleClient } from '@
 import { withSupabaseRetry } from '@/lib/supabase/retry'
 import { extractBucketObjectPath } from '@/lib/storage/object-path'
 
+import type { CertificationType } from '@/types/database'
+
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
 const SUPPORTED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'avif', 'pdf']
 
@@ -43,8 +45,8 @@ export async function POST(request: Request) {
 
   if (!profileId) return json('缺少客户 ID', 400)
 
-  const validTypes = ['identity', 'education', 'income', 'assets', 'marital_history', 'health', 'other']
-  if (!validTypes.includes(certType)) return json('认证类型无效', 400)
+  const validTypes: CertificationType[] = ['identity', 'education', 'income', 'assets', 'marital_history', 'health', 'other']
+  if (!validTypes.includes(certType as CertificationType)) return json('认证类型无效', 400)
 
   if (!(file instanceof File)) return json('未读取到文件', 400)
   if (file.size <= 0 || file.size > MAX_FILE_SIZE_BYTES) return json('文件大小需要控制在 20MB 以内', 400)
@@ -91,7 +93,7 @@ export async function POST(request: Request) {
       .from('profile_certifications')
       .select('id, material_refs, status')
       .eq('profile_id', profileId)
-      .eq('type', certType)
+      .eq('type', certType as CertificationType)
       .maybeSingle(),
     { label: 'cert record lookup' }
   )
@@ -116,7 +118,7 @@ export async function POST(request: Request) {
         .from('profile_certifications')
         .insert({
           profile_id: profileId,
-          type: certType as any,
+          type: certType as CertificationType,
           status: 'pending_review',
           material_refs: [publicUrl],
           submitted_at: new Date().toISOString(),
