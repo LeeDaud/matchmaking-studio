@@ -24,7 +24,12 @@ import {
   ConversationStatus,
   ReminderType,
   ImportanceLevel,
+  CertificationType,
+  CertificationStatus,
 } from './database'
+
+export type ProfileCertification = Database['public']['Tables']['profile_certifications']['Row']
+export type SupplementalMaterial = Database['public']['Tables']['supplemental_materials']['Row']
 
 export type Profile = Database['public']['Tables']['profiles']['Row']
 export type Intention = Database['public']['Tables']['intentions']['Row']
@@ -252,4 +257,43 @@ export const LIFECYCLE_STATUS_LABELS: Record<LifecycleStatus, string> = {
   paused: '暂停',
   matched_success: '匹配成功',
   archived: '已归档',
+}
+
+export const CERTIFICATION_TYPE_LABELS: Record<CertificationType, string> = {
+  identity: '身份认证',
+  education: '学历认证',
+  income: '收入认证',
+  assets: '资产认证',
+  marital_history: '婚况认证',
+  health: '健康认证',
+  other: '其他认证',
+}
+
+export const CERTIFICATION_STATUS_LABELS: Record<CertificationStatus, string> = {
+  not_submitted: '未认证',
+  pending_review: '审核中',
+  verified: '已认证',
+  rejected: '未通过',
+  expired: '已过期',
+}
+
+/** 认证标签展示优先级（空间有限时按此顺序取前 N 个） */
+export const CERTIFICATION_DISPLAY_PRIORITY: CertificationType[] = [
+  'identity',
+  'marital_history',
+  'education',
+  'income',
+  'assets',
+  'health',
+]
+
+/** 各认证类型关联的正式字段 key */
+export const CERTIFICATION_RELATED_FIELDS: Record<CertificationType, string[]> = {
+  identity: ['full_name', 'gender', 'birth_year_month'],
+  education: ['education_level_v2', 'bachelor_school', 'master_school', 'doctor_school'],
+  income: ['monthly_income', 'annual_income', 'income_source_type'],
+  assets: ['has_property', 'property_count', 'has_vehicle', 'vehicle_brand', 'vehicle_model', 'family_asset_band'],
+  marital_history: ['marital_history_enum'],
+  health: [],
+  other: [],
 }

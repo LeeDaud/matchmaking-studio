@@ -74,6 +74,32 @@ export type ParentsMaritalStatusType = 'together' | 'divorced' | 'widowed' | 'un
 
 /** 与前任金融往来 */
 export type FinancialTiesType = 'yes' | 'no' | 'unknown'
+
+// ── 甄恋 Phase-1 认证类型 ──────────────────────────────────────
+
+/** 认证类型 */
+export type CertificationType =
+  | 'identity'
+  | 'education'
+  | 'income'
+  | 'assets'
+  | 'marital_history'
+  | 'health'
+  | 'other'
+
+/** 认证状态 */
+export type CertificationStatus =
+  | 'not_submitted'
+  | 'pending_review'
+  | 'verified'
+  | 'rejected'
+  | 'expired'
+
+/** 补充材料类型 */
+export type SupplementalMaterialKind = 'document' | 'screenshot' | 'voice_note' | 'other'
+
+/** 补充材料来源 */
+export type SupplementalMaterialSource = 'matchmaker' | 'client' | 'imported' | 'system'
 export type RelationshipMode =
   | 'marriage_standard'
   | 'compensated_dating'
@@ -1086,8 +1112,91 @@ export interface Database {
         }
         Relationships: []
       }
-    }
-    Views: Record<string, never>
+      // ── 甄恋 Phase-1 认证表 ──────────────────────────────────
+      profile_certifications: {
+        Row: {
+          id: string
+          profile_id: string
+          type: CertificationType
+          status: CertificationStatus
+          material_refs: string[]
+          submitted_at: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          review_notes: string | null
+          rejection_reason: string | null
+          expires_at: string | null
+          related_field_keys: string[]
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          profile_id: string
+          type: CertificationType
+          status?: CertificationStatus
+          material_refs?: string[]
+          submitted_at?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          review_notes?: string | null
+          rejection_reason?: string | null
+          expires_at?: string | null
+          related_field_keys?: string[]
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          profile_id?: string
+          type?: CertificationType
+          status?: CertificationStatus
+          material_refs?: string[]
+          submitted_at?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          review_notes?: string | null
+          rejection_reason?: string | null
+          expires_at?: string | null
+          related_field_keys?: string[]
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      supplemental_materials: {
+        Row: {
+          id: string
+          profile_id: string
+          kind: SupplementalMaterialKind
+          url: string
+          title: string | null
+          description: string | null
+          source: SupplementalMaterialSource
+          uploaded_at: string
+        }
+        Insert: {
+          id?: string
+          profile_id: string
+          kind: SupplementalMaterialKind
+          url: string
+          title?: string | null
+          description?: string | null
+          source?: SupplementalMaterialSource
+          uploaded_at?: string
+        }
+        Update: {
+          id?: string
+          profile_id?: string
+          kind?: SupplementalMaterialKind
+          url?: string
+          title?: string | null
+          description?: string | null
+          source?: SupplementalMaterialSource
+          uploaded_at?: string
+        }
+        Relationships: []
+      }
     Functions: Record<string, never>
     Enums: {
       gender_type: GenderType
@@ -1121,6 +1230,10 @@ export interface Database {
       urgency_level_type: UrgencyLevelType
       parents_marital_status_type: ParentsMaritalStatusType
       financial_ties_type: FinancialTiesType
+      certification_type: CertificationType
+      certification_status: CertificationStatus
+      supplemental_material_kind: SupplementalMaterialKind
+      supplemental_material_source: SupplementalMaterialSource
     }
     CompositeTypes: Record<string, never>
   }
@@ -1166,6 +1279,14 @@ export type CustomerLifecycleUpdate = Database['public']['Tables']['customer_lif
 export type CustomerSource = Database['public']['Tables']['customer_source']['Row']
 export type CustomerSourceInsert = Database['public']['Tables']['customer_source']['Insert']
 export type CustomerSourceUpdate = Database['public']['Tables']['customer_source']['Update']
+
+export type ProfileCertification = Database['public']['Tables']['profile_certifications']['Row']
+export type ProfileCertificationInsert = Database['public']['Tables']['profile_certifications']['Insert']
+export type ProfileCertificationUpdate = Database['public']['Tables']['profile_certifications']['Update']
+
+export type SupplementalMaterial = Database['public']['Tables']['supplemental_materials']['Row']
+export type SupplementalMaterialInsert = Database['public']['Tables']['supplemental_materials']['Insert']
+export type SupplementalMaterialUpdate = Database['public']['Tables']['supplemental_materials']['Update']
 
 export type UserRoleRow = Database['public']['Tables']['user_roles']['Row']
 export type UserRoleInsert = Database['public']['Tables']['user_roles']['Insert']

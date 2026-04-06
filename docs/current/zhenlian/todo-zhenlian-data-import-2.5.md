@@ -1,6 +1,10 @@
 # 甄恋 CRM 数据导入三通道执行清单（模块一 2.5 Todo）
 
-> 状态：待执行  
+> 状态：Phase-1 代码实现已完成（PDF 上传留存 + 截图上传留存 + 补充材料 API）  
+> 代码产出：
+> - `supabase/migrations/014_certification_and_materials.sql` — supplemental_materials 表
+> - `app/api/supplemental-materials/route.ts` — 补充材料上传 API
+> - `components/client/data-import-panel.tsx` — 数据导入 UI 组件  
 > 适用范围：甄恋 CRM 当前主线，模块一 `2.5 数据导入：三通道方案` 的执行拆解  
 > 依据文档：
 > - [甄恋CRM产品重构方案（聚合版）.md](./甄恋CRM产品重构方案（聚合版）.md)

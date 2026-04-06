@@ -1,6 +1,12 @@
 # 甄恋 CRM 认证体系执行清单（模块一 2.4 Todo）
 
-> 状态：已完成，正式冻结输出见 [freeze-zhenlian-certification-v1.md](./freeze-zhenlian-certification-v1.md)  
+> 状态：已完成（规格冻结 + 代码实现），正式冻结输出见 [freeze-zhenlian-certification-v1.md](./freeze-zhenlian-certification-v1.md)  
+> 代码产出：
+> - `supabase/migrations/014_certification_and_materials.sql` — DB migration
+> - `types/database.ts` / `types/app.ts` — 类型定义与标签
+> - `actions/certifications.ts` — 服务端操作（CRUD + 审核）
+> - `app/api/certification-materials/route.ts` — 认证材料上传 API
+> - `components/client/certification-panel.tsx` — 认证 UI 组件  
 > 适用范围：甄恋 CRM 当前主线，模块一 `2.4 认证体系` 的执行拆解  
 > 依据文档：
 > - [甄恋CRM产品重构方案（聚合版）.md](./甄恋CRM产品重构方案（聚合版）.md)

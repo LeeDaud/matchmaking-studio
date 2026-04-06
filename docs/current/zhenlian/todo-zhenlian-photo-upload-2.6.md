@@ -1,6 +1,10 @@
 # 甄恋 CRM 照片上传体验优化执行清单（模块一 2.6 Todo）
 
-> 状态：待执行  
+> 状态：Phase-1 代码实现已完成（粘贴上传 + 拖拽上传 + 删除 + 设为头像）  
+> 代码产出：
+> - `components/client/profile-photo-manager.tsx` — 增强版照片管理组件
+> - `app/api/profile-photos/delete/route.ts` — 生活照删除 API
+> - `app/api/profile-photos/set-avatar/route.ts` — 设为头像 API  
 > 适用范围：甄恋 CRM 当前主线，模块一 `2.6 照片上传体验优化` 的执行拆解  
 > 依据文档：
 > - [甄恋CRM产品重构方案（聚合版）.md](./甄恋CRM产品重构方案（聚合版）.md)

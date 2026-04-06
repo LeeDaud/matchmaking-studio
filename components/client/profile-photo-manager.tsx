@@ -1,11 +1,11 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
-import { Camera, ImagePlus, Loader2 } from 'lucide-react'
+import { Camera, ImagePlus, Loader2, Trash2, UserCircle } from 'lucide-react'
 import { ProfileAvatar } from '@/components/client/profile-avatar'
 
 interface ProfilePhotoManagerProps {
@@ -24,17 +24,21 @@ export function ProfilePhotoManager({
   const router = useRouter()
   const avatarInputRef = useRef<HTMLInputElement | null>(null)
   const lifestyleInputRef = useRef<HTMLInputElement | null>(null)
+  const dropZoneRef = useRef<HTMLDivElement | null>(null)
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState(avatarUrl ?? null)
   const [currentLifestylePhotoUrls, setCurrentLifestylePhotoUrls] = useState(lifestylePhotoUrls ?? [])
   const [uploadingKind, setUploadingKind] = useState<'avatar' | 'lifestyle' | null>(null)
+  const [deletingUrl, setDeletingUrl] = useState<string | null>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
 
-  async function uploadFiles(kind: 'avatar' | 'lifestyle', files: FileList | null) {
-    if (!files?.length) return
+  async function uploadFiles(kind: 'avatar' | 'lifestyle', files: FileList | File[] | null) {
+    if (!files || (files instanceof FileList && !files.length) || (Array.isArray(files) && !files.length)) return
 
     setUploadingKind(kind)
 
     try {
-      for (const file of Array.from(files)) {
+      const fileArray = files instanceof FileList ? Array.from(files) : files
+      for (const file of fileArray) {
         const body = new FormData()
         body.set('profileId', profileId)
         body.set('kind', kind)
@@ -71,6 +75,91 @@ export function ProfilePhotoManager({
       setUploadingKind(null)
       if (avatarInputRef.current) avatarInputRef.current.value = ''
       if (lifestyleInputRef.current) lifestyleInputRef.current.value = ''
+    }
+  }
+
+  async function deleteLifestylePhoto(url: string) {
+    setDeletingUrl(url)
+    try {
+      const nextUrls = currentLifestylePhotoUrls.filter((u) => u !== url)
+      const response = await fetch('/api/profile-photos/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId, photoUrl: url }),
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || '删除失败')
+      }
+      setCurrentLifestylePhotoUrls(nextUrls)
+      toast.success('照片已删除')
+      router.refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '删除失败')
+    } finally {
+      setDeletingUrl(null)
+    }
+  }
+
+  async function setAsAvatar(url: string) {
+    setUploadingKind('avatar')
+    try {
+      const response = await fetch('/api/profile-photos/set-avatar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId, photoUrl: url }),
+      })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || '设置失败')
+      }
+      setCurrentAvatarUrl(url)
+      toast.success('已设为头像')
+      router.refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '设置失败')
+    } finally {
+      setUploadingKind(null)
+    }
+  }
+
+  // 粘贴上传
+  const handlePaste = useCallback((e: ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    const imageFiles: File[] = []
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) imageFiles.push(file)
+      }
+    }
+    if (imageFiles.length > 0) {
+      e.preventDefault()
+      uploadFiles('lifestyle', imageFiles)
+    }
+  }, [profileId])
+
+  useEffect(() => {
+    document.addEventListener('paste', handlePaste)
+    return () => document.removeEventListener('paste', handlePaste)
+  }, [handlePaste])
+
+  // 拖拽上传
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault()
+    setIsDragOver(true)
+  }
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault()
+    setIsDragOver(false)
+  }
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setIsDragOver(false)
+    const files = e.dataTransfer.files
+    if (files.length > 0) {
+      uploadFiles('lifestyle', files)
     }
   }
 
@@ -123,7 +212,7 @@ export function ProfilePhotoManager({
             <div className="space-y-1">
               <Label className="text-sm text-foreground/85">生活照</Label>
               <p className="text-xs leading-5 text-muted-foreground">
-                生活照用于补充资料展示，不会自动拿来顶替头像。
+                生活照用于补充资料展示。支持拖拽、粘贴（Ctrl+V）或点击上传。
               </p>
             </div>
             <Button
@@ -147,20 +236,58 @@ export function ProfilePhotoManager({
             onChange={(event) => uploadFiles('lifestyle', event.target.files)}
           />
 
-          {currentLifestylePhotoUrls.length ? (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              {currentLifestylePhotoUrls.map((url) => (
-                <a key={url} href={url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-2xl border border-border/80 bg-white shadow-[0_14px_28px_-22px_rgba(15,23,42,0.12)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-[0_20px_42px_-28px_rgba(0,0,0,0.58)]">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={url} alt={`${name} 生活照`} className="h-28 w-full object-cover" />
-                </a>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-border bg-white/75 px-4 py-5 text-sm text-muted-foreground dark:border-white/10 dark:bg-white/[0.03] dark:text-foreground/58">
-              还没有上传生活照。后续可以补充气质照、旅行照或日常生活照。
-            </div>
-          )}
+          <div
+            ref={dropZoneRef}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`min-h-[120px] rounded-2xl border-2 border-dashed transition-colors ${
+              isDragOver
+                ? 'border-primary bg-primary/5'
+                : 'border-border bg-white/75 dark:border-white/10 dark:bg-white/[0.03]'
+            }`}
+          >
+            {currentLifestylePhotoUrls.length ? (
+              <div className="grid grid-cols-2 gap-3 p-3 md:grid-cols-3">
+                {currentLifestylePhotoUrls.map((url) => (
+                  <div key={url} className="group relative overflow-hidden rounded-2xl border border-border/80 bg-white shadow-[0_14px_28px_-22px_rgba(15,23,42,0.12)] dark:border-white/10 dark:bg-white/[0.04] dark:shadow-[0_20px_42px_-28px_rgba(0,0,0,0.58)]">
+                    <a href={url} target="_blank" rel="noreferrer" className="block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={url} alt={`${name} 生活照`} className="h-28 w-full object-cover" />
+                    </a>
+                    <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                      <button
+                        type="button"
+                        title="设为头像"
+                        className="rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
+                        onClick={() => setAsAvatar(url)}
+                        disabled={uploadingKind !== null}
+                      >
+                        <UserCircle className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        title="删除"
+                        className="rounded-full bg-black/60 p-1 text-white hover:bg-red-600"
+                        onClick={() => deleteLifestylePhoto(url)}
+                        disabled={deletingUrl !== null}
+                      >
+                        {deletingUrl === url ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex h-[120px] items-center justify-center px-4 text-sm text-muted-foreground dark:text-foreground/58">
+                {isDragOver ? '松开鼠标上传图片' : '拖拽图片到此处，或点击上方按钮上传'}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </section>
