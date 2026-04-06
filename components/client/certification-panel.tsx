@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Loader2, Upload, CheckCircle2, XCircle, Clock, AlertTriangle,
   FileText, ChevronDown, ChevronUp, Sparkles, Check, Minus, Flag,
-  RefreshCw,
+  RefreshCw, Eye, Trash2,
 } from 'lucide-react'
 import {
   CERTIFICATION_TYPE_LABELS,
@@ -69,6 +69,111 @@ export function CertificationTagList({
           {CERTIFICATION_TYPE_LABELS[type]}
         </Badge>
       ))}
+    </div>
+  )
+}
+
+/* ── 已上传材料列表 ──────────────────────────────────────── */
+
+function isPdfUrl(url: string) {
+  return url.toLowerCase().includes('.pdf') || url.toLowerCase().includes('pdf')
+}
+
+function MaterialList({ certId, refs, onRefresh }: { certId: string; refs: string[]; onRefresh: () => void }) {
+  if (!refs.length) return null
+  const [deletingIndex, setDeletingIndex] = useState<number | null>(null)
+
+  async function handleDelete(index: number) {
+    setDeletingIndex(index)
+    try {
+      const res = await fetch('/api/certification-materials/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ certId, index }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.success) throw new Error(data?.message ?? '删除失败')
+      toast.success('已删除')
+      onRefresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '删除失败')
+    } finally {
+      setDeletingIndex(null)
+    }
+  }
+
+  return (
+    <div className="mt-2.5 flex flex-wrap gap-2">
+      {refs.map((url, index) => {
+        const viewUrl = `/api/certification-materials/view?certId=${certId}&index=${index}`
+        const isPdf = isPdfUrl(url)
+        const isDeleting = deletingIndex === index
+
+        return (
+          <div key={index} className="group relative">
+            <a
+              href={viewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/60 bg-muted/30 transition-colors hover:border-primary/40 hover:bg-muted/50 dark:border-white/8 dark:bg-white/[0.03] dark:hover:border-primary/30"
+              title={`查看第 ${index + 1} 份材料`}
+            >
+              {isPdf ? (
+                <div className="flex flex-col items-center gap-0.5">
+                  <FileText className="h-6 w-6 text-muted-foreground/60 group-hover:text-primary/70" />
+                  <span className="text-[10px] text-muted-foreground/60 group-hover:text-primary/70">
+                    PDF {index + 1}
+                  </span>
+                </div>
+              ) : (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={viewUrl}
+                    alt={`材料 ${index + 1}`}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    onError={(e) => {
+                      const target = e.currentTarget
+                      target.style.display = 'none'
+                      const parent = target.parentElement
+                      if (parent) {
+                        const fallback = parent.querySelector('[data-fallback]') as HTMLElement | null
+                        if (fallback) fallback.style.display = 'flex'
+                      }
+                    }}
+                  />
+                  <div
+                    data-fallback
+                    className="absolute inset-0 hidden flex-col items-center justify-center gap-0.5"
+                  >
+                    <FileText className="h-6 w-6 text-muted-foreground/60" />
+                    <span className="text-[10px] text-muted-foreground/60">{index + 1}</span>
+                  </div>
+                </>
+              )}
+              {/* hover 遮罩 */}
+              <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/0 transition-colors group-hover:bg-black/12 dark:group-hover:bg-black/30">
+                <Eye className="h-4 w-4 text-white opacity-0 drop-shadow-sm transition-opacity group-hover:opacity-100" />
+              </div>
+            </a>
+
+            {/* 删除按钮 — hover 时出现在右上角 */}
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={() => handleDelete(index)}
+              className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-border/60 bg-white text-muted-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 hover:border-red-300 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:border-white/12 dark:bg-neutral-900 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+              title="删除此材料"
+            >
+              {isDeleting
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <Trash2 className="h-3 w-3" />
+              }
+            </button>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -225,15 +330,19 @@ function ExtractionResultPanel({
   cert: ProfileCertification
   onRefresh: () => void
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
+  const [cancelling, setCancelling] = useState(false)
 
   let extraction: CertificationExtractionResult | null = null
   let isExtractionError = false
+  let isCancelled = false
 
   try {
     if (cert.review_notes) {
       const parsed = JSON.parse(cert.review_notes)
-      if (parsed.extraction_error) {
+      if (parsed.extraction_cancelled) {
+        isCancelled = true
+      } else if (parsed.extraction_error) {
         isExtractionError = true
       } else if (parsed.field_comparisons) {
         extraction = parsed
@@ -243,18 +352,62 @@ function ExtractionResultPanel({
     // review_notes 不是 JSON，可能是旧格式文本注释
   }
 
-  // 没有提取结果（刚上传、正在处理中）
-  if (!extraction && !isExtractionError) {
+  async function handleCancel() {
+    setCancelling(true)
+    try {
+      const res = await fetch('/api/certification-materials/cancel-extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ certId: cert.id }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok || !data?.success) throw new Error(data?.message ?? '取消失败')
+      toast.success('已取消 AI 提取')
+      onRefresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '取消失败')
+    } finally {
+      setCancelling(false)
+    }
+  }
+
+  // 已被取消
+  if (isCancelled) {
     return (
-      <div className="mt-2.5 flex items-center gap-2 rounded-xl bg-muted/40 px-3 py-2 text-xs text-muted-foreground dark:bg-white/[0.03]">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary/60" />
-        <span>AI 正在读取材料内容…</span>
+      <div className="mt-2.5 flex items-center gap-2 rounded-xl bg-muted/30 px-3 py-2 text-xs text-muted-foreground dark:bg-white/[0.02]">
+        <Minus className="h-3.5 w-3.5 shrink-0" />
+        <span>AI 提取已取消</span>
         <button
           className="ml-auto text-[11px] underline-offset-2 hover:underline"
           onClick={onRefresh}
         >
           刷新
         </button>
+      </div>
+    )
+  }
+
+  // 没有提取结果（刚上传、正在处理中）
+  if (!extraction && !isExtractionError) {
+    return (
+      <div className="mt-2.5 flex items-center gap-2 rounded-xl bg-muted/40 px-3 py-2 text-xs text-muted-foreground dark:bg-white/[0.03]">
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary/60" />
+        <span>AI 正在读取材料内容…</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            className="text-[11px] underline-offset-2 hover:underline disabled:opacity-50"
+            disabled={cancelling}
+            onClick={handleCancel}
+          >
+            {cancelling ? <Loader2 className="inline h-3 w-3 animate-spin" /> : '取消'}
+          </button>
+          <button
+            className="text-[11px] underline-offset-2 hover:underline"
+            onClick={onRefresh}
+          >
+            刷新
+          </button>
+        </div>
       </div>
     )
   }
@@ -311,9 +464,16 @@ function ExtractionResultPanel({
       {/* 详情列表 */}
       {expanded && (
         <div className="border-t border-border/50 px-3 py-2 dark:border-white/6">
-          {extraction.field_comparisons
-            .filter((f) => f.match !== 'unreadable')
-            .map((item) => (
+          {(() => {
+            const visibleItems = extraction.field_comparisons.filter((f) => f.match !== 'unreadable')
+            if (visibleItems.length === 0) {
+              return (
+                <p className="py-2 text-[11px] text-muted-foreground">
+                  未能从材料中识别出指定字段，请检查材料内容或手动录入
+                </p>
+              )
+            }
+            return visibleItems.map((item) => (
               <FieldComparisonRow
                 key={item.field_key}
                 item={item}
@@ -321,7 +481,7 @@ function ExtractionResultPanel({
                 onActionDone={onRefresh}
               />
             ))
-          }
+          })()}
           {extraction.extra_observations.length > 0 && (
             <div className="mt-2 rounded-lg bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
               <span className="font-medium">其他观察：</span>
@@ -425,11 +585,6 @@ export function CertificationPanel({ profileId, certifications }: CertificationP
                         驳回原因：{cert.rejection_reason}
                       </p>
                     )}
-                    {cert?.material_refs && cert.material_refs.length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        已上传 {cert.material_refs.length} 份材料
-                      </p>
-                    )}
                   </div>
                 </div>
 
@@ -471,6 +626,11 @@ export function CertificationPanel({ profileId, certifications }: CertificationP
                   )}
                 </div>
               </div>
+
+              {/* 已上传材料缩略图 */}
+              {cert && cert.material_refs && cert.material_refs.length > 0 && (
+                <MaterialList certId={cert.id} refs={cert.material_refs} onRefresh={() => router.refresh()} />
+              )}
 
               {/* AI 提取结果 */}
               {showExtraction && cert && (

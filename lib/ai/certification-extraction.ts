@@ -69,12 +69,19 @@ function getFieldLabel(key: string): string {
 // PDF → 图片（用 pdfjs-dist 渲染第一页为 PNG buffer）
 // ──────────────────────────────────────────────────────────────
 
-/** 从 PDF URL 提取纯文字（用于 Claude 文本分析）*/
-async function pdfUrlToText(pdfUrl: string): Promise<string | null> {
+/** 从 PDF URL 提取纯文字（用于 Claude 文本分析）
+ *
+ * @returns [text, error] — text 为 null 表示提取失败，error 为错误信息
+ */
+async function pdfUrlToText(pdfUrl: string): Promise<[string | null, string | null]> {
   try {
     const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
 
-    const arrayBuffer = await fetch(pdfUrl).then((r) => r.arrayBuffer())
+    const response = await fetch(pdfUrl)
+    if (!response.ok) {
+      return [null, `下载 PDF 失败 (HTTP ${response.status})`]
+    }
+    const arrayBuffer = await response.arrayBuffer()
     const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) })
     const pdf = await loadingTask.promise
     const texts: string[] = []
@@ -91,9 +98,12 @@ async function pdfUrlToText(pdfUrl: string): Promise<string | null> {
       texts.push(pageText)
     }
 
-    return texts.join('\n\n').trim() || null
-  } catch {
-    return null
+    const text = texts.join('\n\n').trim()
+    if (!text) return [null, 'PDF 中未提取到文字内容（可能是扫描图片型 PDF）']
+    return [text, null]
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return [null, `PDF 解析异常：${message}`]
   }
 }
 
@@ -101,25 +111,29 @@ async function pdfUrlToText(pdfUrl: string): Promise<string | null> {
 // 提示词构建
 // ──────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(): string {
+function buildSystemPrompt(isPdfMode: boolean): string {
+  const inputDescription = isPdfMode
+    ? '用户会提供从 PDF 中提取的原始文字内容'
+    : '用户会提供认证材料的图片（证件照片、证书扫描件等）'
+
   return `你是婚恋机构的认证材料核验助手。
 
 你的任务：
-1. 读取用户提供的认证材料（证件照片、证书扫描件等）
+1. ${inputDescription}
 2. 提取材料中与指定字段相关的信息
 3. 与档案中的现有值逐字段比对
 4. 输出结构化 JSON，绝对不要输出 Markdown 或解释文字
 
 比对规则：
-- match：材料值与档案值一致（允许小差异，如"男"vs"male"）
+- match：材料值与档案值一致（允许小差异，如"男"vs"male"，或年龄相差1岁以内）
 - conflict：材料值与档案值明确不同（如档案年龄30，材料显示28）
 - new_info：档案值为空，材料提供了新信息
-- unreadable：图片模糊/遮挡/字段不存在于该材料中
+- unreadable：${isPdfMode ? '文字中找不到该字段的对应内容' : '图片模糊/遮挡/字段不存在于该材料中'}
 
 置信度：
-- high：字段清晰可读，无歧义
-- medium：可读但有轻微模糊或推断
-- low：模糊、遮挡或推断成分较多
+- high：字段清晰明确，无歧义
+- medium：可识别但有轻微不确定性
+- low：推断成分较多或存在歧义
 
 输出 JSON 格式（严格遵守，不要输出其他内容）：
 {
@@ -156,18 +170,30 @@ function buildUserPrompt(
     return `  - ${key}（${label}）：当前档案值 = ${displayValue}`
   }).join('\n')
 
+  const isPdfMode = !!pdfText
+
   const parts = [
     `认证类型：${certLabel}`,
     '',
     `需要核验的字段：`,
     fieldGuide,
     '',
-    `请仔细读取图片中的所有文字，提取上述字段的值，并与档案值逐一比对。`,
-    `如果某个字段在该类型材料中通常不会出现，请标记 match 为 "unreadable"，material_value 为 null。`,
   ]
 
-  if (pdfText) {
-    parts.push('', '注意：以下是从 PDF 中提取的文字内容（图片渲染失败时的备选）：', pdfText.slice(0, 3000))
+  if (isPdfMode) {
+    parts.push(
+      `以下是从 PDF 文件中提取的原始文字内容，请仔细阅读，从中找出上述字段的值，并与档案值逐一比对。`,
+      `如果某个字段在以下文字中完全找不到对应内容，请标记 match 为 "unreadable"，material_value 为 null。`,
+      '',
+      '--- PDF 原始文字开始 ---',
+      pdfText.slice(0, 4000),
+      '--- PDF 原始文字结束 ---',
+    )
+  } else {
+    parts.push(
+      `请仔细读取图片中的所有文字，提取上述字段的值，并与档案值逐一比对。`,
+      `如果某个字段在该类型材料中通常不会出现，请标记 match 为 "unreadable"，material_value 为 null。`,
+    )
   }
 
   return parts.join('\n')
@@ -197,10 +223,19 @@ export async function extractFromCertificationMaterial({
   let imageBase64: string | null = null
   let pdfFallbackText: string | null = null
   let mediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' = 'image/jpeg'
+  const processingNotes: string[] = []
 
   if (isPdf) {
     // PDF：提取文字，发给 Claude 进行文字分析
-    pdfFallbackText = await pdfUrlToText(fileUrl)
+    const [text, pdfError] = await pdfUrlToText(fileUrl)
+    pdfFallbackText = text
+    if (pdfError) {
+      processingNotes.push(`PDF 文字提取失败：${pdfError}`)
+    }
+    if (!pdfFallbackText) {
+      // PDF 无文字内容，无法继续
+      throw new Error(pdfError ?? 'PDF 文字提取失败，无法进行 AI 分析')
+    }
     // imageBase64 保持 null，Claude 仅分析文字
   } else {
     // 图片：下载为 base64 走 Vision
@@ -238,13 +273,13 @@ export async function extractFromCertificationMaterial({
     text: buildUserPrompt(certType, relatedFields, profileSnapshot, pdfFallbackText),
   })
 
-  // ── 3. 调用 Claude Vision ──
+  // ── 3. 调用 Claude ──
   let rawText = ''
   try {
     const message = await anthropic.messages.create({
       model: 'claude-opus-4-5',
-      max_tokens: 1024,
-      system: buildSystemPrompt(),
+      max_tokens: 2048,
+      system: buildSystemPrompt(isPdf),
       messages: [{ role: 'user', content: userContent }],
     })
 
@@ -304,7 +339,7 @@ export async function extractFromCertificationMaterial({
     document_summary: parsed.document_summary ?? '无法识别文件类型',
     field_comparisons: fieldComparisons,
     extra_observations: parsed.extra_observations ?? [],
-    processing_notes: parsed.processing_notes ?? [],
+    processing_notes: [...processingNotes, ...(parsed.processing_notes ?? [])],
     extracted_at: new Date().toISOString(),
   }
 }

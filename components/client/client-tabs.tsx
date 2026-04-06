@@ -1,6 +1,6 @@
 'use client'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Profile, Intention, Conversation, Match, TraitProfile, FollowupTask, ProfileCertification } from '@/types/database'
+import { Profile, Intention, Conversation, Match, TraitProfile, FollowupTask, ProfileCertification, SupplementalMaterial } from '@/types/database'
 import { ProfileInfoTab } from './profile-info-tab'
 import { MatchRecommendTab } from './match-recommend-tab'
 import { ConversationsTab } from './conversations-tab'
@@ -16,9 +16,10 @@ interface ClientTabsProps {
   matches: (Match & { male_profile: Profile; female_profile: Profile })[]
   followupTasks: FollowupTask[]
   certifications: ProfileCertification[]
+  supplementalMaterials: SupplementalMaterial[]
 }
 
-export function ClientTabs({ profile, intention, traitProfile, conversations, matches, followupTasks, certifications }: ClientTabsProps) {
+export function ClientTabs({ profile, intention, traitProfile, conversations, matches, followupTasks, certifications, supplementalMaterials }: ClientTabsProps) {
   const pendingMatchCount = matches.filter((match) => match.recommendation_type === 'pending_confirmation').length
   const openTaskCount = followupTasks.filter((task) => task.status === 'open' || task.status === 'in_progress').length
   const pendingCertCount = certifications.filter((c) => c.status === 'pending_review').length
@@ -65,7 +66,7 @@ export function ClientTabs({ profile, intention, traitProfile, conversations, ma
       <TabsContent value="certification">
         <div className="space-y-6">
           <CertificationPanel profileId={profile.id} certifications={certifications} />
-          <DataImportPanel profileId={profile.id} />
+          <DataImportPanel profileId={profile.id} materials={supplementalMaterials} />
         </div>
       </TabsContent>
       <TabsContent value="matches">

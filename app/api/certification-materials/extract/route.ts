@@ -81,6 +81,25 @@ export async function POST(request: Request) {
   // 构建精简快照（只含相关字段）
   const profileSnapshot = buildProfileSnapshot(cert.type as CertificationType, profile, intention)
 
+  // 调用 AI 提取之前，先检查是否已被取消
+  const { data: latestCert } = await withSupabaseRetry(
+    () => serviceRoleClient
+      .from('profile_certifications')
+      .select('review_notes')
+      .eq('id', certId)
+      .single(),
+    { label: 'cert extract: check cancel flag' }
+  )
+
+  try {
+    const notes = latestCert?.review_notes ? JSON.parse(latestCert.review_notes) : null
+    if (notes?.extraction_cancelled) {
+      return Response.json({ success: false, message: '提取已被取消' })
+    }
+  } catch {
+    // review_notes 不是 JSON，忽略
+  }
+
   // 调用 AI 提取
   let extractionResult
   try {
