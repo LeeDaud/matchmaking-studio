@@ -24,6 +24,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     conversationsResult,
     matchesResult,
     followupTasksResult,
+    certificationsResult,
   ] = await Promise.all([
     withSupabaseRetry(() => supabase.from('profiles').select('*').eq('id', id).single(), { label: 'client detail profile query' }),
     withSupabaseRetry(() => supabase.from('intentions').select('*').eq('profile_id', id).single(), { label: 'client detail intention query' }),
@@ -38,6 +39,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       { label: 'client detail matches query' }
     ),
     withSupabaseRetry(() => supabase.from('followup_tasks').select('*').eq('profile_id', id).order('updated_at', { ascending: false }), { label: 'client detail followup tasks query' }),
+    withSupabaseRetry(() => supabase.from('profile_certifications').select('*').eq('profile_id', id).order('created_at'), { label: 'client detail certifications query' }),
   ])
 
   if (profileResult.error) {
@@ -50,6 +52,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const { data: conversations } = conversationsResult
   const { data: matches } = matchesResult
   const { data: followupTasks } = followupTasksResult
+  const { data: certifications } = certificationsResult
 
   if (!profile) notFound()
 
@@ -142,6 +145,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             conversations={conversationRows}
             matches={(matches as any) ?? []}
             followupTasks={followupTaskRows}
+            certifications={(certifications as any) ?? []}
           />
         </div>
       }
