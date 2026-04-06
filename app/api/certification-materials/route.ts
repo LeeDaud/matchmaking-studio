@@ -1,6 +1,7 @@
 import { createClient as createSupabaseClient, createServiceRoleClient } from '@/lib/supabase/server'
 import { withSupabaseRetry } from '@/lib/supabase/retry'
 import { extractBucketObjectPath } from '@/lib/storage/object-path'
+import { headers } from 'next/headers'
 
 import type { CertificationType } from '@/types/database'
 
@@ -98,6 +99,8 @@ export async function POST(request: Request) {
     { label: 'cert record lookup' }
   )
 
+  let certId: string
+
   if (existing) {
     const newRefs = [...(existing.material_refs ?? []), publicUrl]
     await withSupabaseRetry(
@@ -108,12 +111,15 @@ export async function POST(request: Request) {
           status: 'pending_review',
           submitted_at: new Date().toISOString(),
           rejection_reason: null,
+          // 上传新材料时清空旧的提取结果，等待重新提取
+          review_notes: null,
         })
         .eq('id', existing.id),
       { label: 'cert record update' }
     )
+    certId = existing.id
   } else {
-    await withSupabaseRetry(
+    const { data: inserted } = await withSupabaseRetry(
       () => serviceRoleClient
         .from('profile_certifications')
         .insert({
@@ -123,12 +129,38 @@ export async function POST(request: Request) {
           material_refs: [publicUrl],
           submitted_at: new Date().toISOString(),
           related_field_keys: getRelatedFieldKeys(certType),
-        }),
+        })
+        .select('id')
+        .single(),
       { label: 'cert record insert' }
     )
+    certId = inserted?.id ?? ''
   }
 
-  return Response.json({ success: true, fileUrl: publicUrl })
+  // 异步触发 AI 提取（不阻塞上传响应）
+  if (certId) {
+    const fileExtension = objectPath.split('.').pop() ?? 'jpg'
+    const headersList = await headers()
+    const host = headersList.get('host') ?? 'localhost:3000'
+    const protocol = host.startsWith('localhost') ? 'http' : 'https'
+    const extractUrl = `${protocol}://${host}/api/certification-materials/extract`
+
+    // fire-and-forget：不 await，不影响当前请求响应
+    fetch(extractUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.INTERNAL_API_SECRET
+          ? { 'x-internal-secret': process.env.INTERNAL_API_SECRET }
+          : {}),
+      },
+      body: JSON.stringify({ profileId, certId, fileUrl: publicUrl, fileExtension }),
+    }).catch(() => {
+      // 提取失败不影响上传结果，错误由 extract route 内部记录
+    })
+  }
+
+  return Response.json({ success: true, fileUrl: publicUrl, certId })
 }
 
 function getRelatedFieldKeys(certType: string): string[] {
