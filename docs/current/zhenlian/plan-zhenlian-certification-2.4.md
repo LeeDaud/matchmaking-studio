@@ -1,6 +1,6 @@
 # 甄恋 CRM 认证体系详细需求方案（模块一 2.4）
 
-> 状态：详细方案  
+> 状态：详细方案，已由 [freeze-zhenlian-certification-v1.md](./freeze-zhenlian-certification-v1.md) 收口为正式冻结输出  
 > 适用范围：甄恋 CRM 当前主线，模块一 `2.4 认证体系`  
 > 上游文档：
 > - [甄恋CRM产品重构方案（聚合版）.md](./甄恋CRM产品重构方案（聚合版）.md)
