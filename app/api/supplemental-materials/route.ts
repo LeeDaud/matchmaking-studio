@@ -1,5 +1,6 @@
 import { createClient as createSupabaseClient, createServiceRoleClient } from '@/lib/supabase/server'
 import { withSupabaseRetry } from '@/lib/supabase/retry'
+import { headers } from 'next/headers'
 
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
 const SUPPORTED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'avif', 'pdf', 'doc', 'docx']
@@ -86,18 +87,40 @@ export async function POST(request: Request) {
     .getPublicUrl(objectPath)
 
   // 写入 supplemental_materials 表
-  const { error: insertError } = await withSupabaseRetry(
+  const { data: inserted, error: insertError } = await withSupabaseRetry(
     () => serviceRoleClient.from('supplemental_materials').insert({
       profile_id: profileId,
       kind: kind as any,
       url: publicUrl,
       title,
       source: 'matchmaker',
-    }),
+      extraction_status: 'pending',
+    }).select('id').single(),
     { label: 'supplemental material record insert' }
   )
 
   if (insertError) return json(insertError.message, 500)
+
+  // 异步触发 AI 提取（不阻塞上传响应）
+  const materialId = inserted?.id
+  if (materialId) {
+    const fileExtension = objectPath.split('.').pop() ?? 'jpg'
+    const headersList = await headers()
+    const host = headersList.get('host') ?? 'localhost:3000'
+    const protocol = host.startsWith('localhost') ? 'http' : 'https'
+    const extractUrl = `${protocol}://${host}/api/supplemental-materials/extract`
+
+    fetch(extractUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(process.env.INTERNAL_API_SECRET
+          ? { 'x-internal-secret': process.env.INTERNAL_API_SECRET }
+          : {}),
+      },
+      body: JSON.stringify({ materialId, fileUrl: publicUrl, fileExtension, kind }),
+    }).catch(() => {})
+  }
 
   return Response.json({ success: true, fileUrl: publicUrl })
 }

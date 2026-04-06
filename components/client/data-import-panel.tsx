@@ -4,8 +4,12 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Loader2, FileUp, Image, FileText, Eye, Trash2 } from 'lucide-react'
+import {
+  Loader2, Image, FileText, Eye, Trash2,
+  Sparkles, ChevronDown, ChevronUp, RefreshCw, XCircle,
+} from 'lucide-react'
 import type { SupplementalMaterial } from '@/types/database'
+import type { SupplementalExtractionResult, SupplementalObservation } from '@/lib/ai/supplemental-extraction'
 
 interface DataImportPanelProps {
   profileId: string
@@ -17,16 +21,22 @@ type ImportChannel = 'pdf' | 'screenshot'
 const CHANNEL_META: Record<ImportChannel, { label: string; description: string; accept: string; icon: React.ReactNode }> = {
   pdf: {
     label: 'PDF 资料导入',
-    description: '上传客户 PDF 格式的个人资料，系统将保存文件供后续解析提取。',
+    description: '上传客户 PDF 格式的个人资料，AI 将自动读取其中的关键信息。',
     accept: '.pdf,application/pdf',
     icon: <FileText className="h-5 w-5" />,
   },
   screenshot: {
     label: '截图上传',
-    description: '上传微信聊天截图、朋友圈截图等，系统将保存文件供红娘参考。',
+    description: '上传微信聊天截图、朋友圈截图等，AI 将自动提取有价值的信息。',
     accept: 'image/*',
     icon: <Image className="h-5 w-5" />,
   },
+}
+
+const CONFIDENCE_STYLE: Record<SupplementalObservation['confidence'], string> = {
+  high: 'text-foreground/85',
+  medium: 'text-foreground/70',
+  low: 'text-muted-foreground italic',
 }
 
 function isPdfMaterial(material: SupplementalMaterial) {
@@ -36,7 +46,125 @@ function isPdfMaterial(material: SupplementalMaterial) {
   )
 }
 
-function MaterialItem({ material, onDeleted }: { material: SupplementalMaterial; onDeleted: () => void }) {
+/* ── AI 提取结果展示 ─────────────────────────────────── */
+
+function ExtractionPanel({
+  material,
+  onRefresh,
+}: {
+  material: SupplementalMaterial
+  onRefresh: () => void
+}) {
+  const [expanded, setExpanded] = useState(true)
+
+  const status = material.extraction_status
+  const resultRaw = material.extraction_result as Record<string, unknown> | null
+
+  // 失败状态
+  if (status === 'failed') {
+    const errorMsg = (resultRaw?.error as string) ?? 'AI 提取失败'
+    return (
+      <div className="mt-2 flex items-center gap-2 rounded-xl bg-red-50/60 px-3 py-2 text-xs text-red-600 dark:bg-red-950/20 dark:text-red-400">
+        <XCircle className="h-3.5 w-3.5 shrink-0" />
+        <span className="flex-1">{errorMsg}</span>
+        <button className="text-[11px] underline-offset-2 hover:underline" onClick={onRefresh}>
+          刷新
+        </button>
+      </div>
+    )
+  }
+
+  // 处理中 / pending
+  if (status === 'pending' || status === 'processing' || (!status && !resultRaw)) {
+    return (
+      <div className="mt-2 flex items-center gap-2 rounded-xl bg-muted/40 px-3 py-2 text-xs text-muted-foreground dark:bg-white/[0.03]">
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary/60" />
+        <span>AI 正在读取内容…</span>
+        <button className="ml-auto text-[11px] underline-offset-2 hover:underline" onClick={onRefresh}>
+          刷新
+        </button>
+      </div>
+    )
+  }
+
+  // 无结果（status=done 但 resultRaw 为空）
+  if (!resultRaw) return null
+
+  // 解析为强类型
+  const extraction = resultRaw as unknown as SupplementalExtractionResult
+  const observations = extraction.observations ?? []
+
+  return (
+    <div className="mt-2 overflow-hidden rounded-xl border border-border/50 bg-white/60 dark:border-white/6 dark:bg-white/[0.025]">
+      {/* 摘要行 */}
+      <button
+        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary/70" />
+        <span className="min-w-0 flex-1 truncate text-xs text-foreground/80">
+          {extraction.document_summary}
+        </span>
+        {observations.length > 0 && (
+          <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+            {observations.length} 条观察
+          </span>
+        )}
+        {expanded
+          ? <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        }
+      </button>
+
+      {/* 详情 */}
+      {expanded && (
+        <div className="border-t border-border/50 px-3 py-2 dark:border-white/6">
+          {observations.length === 0 ? (
+            <p className="py-1 text-[11px] text-muted-foreground">未从材料中发现有价值的信息</p>
+          ) : (
+            <div className="space-y-1.5">
+              {observations.map((obs, i) => (
+                <div key={i} className="flex gap-2 text-[11px]">
+                  <span className="mt-0.5 shrink-0 rounded-md bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-white/[0.05]">
+                    {obs.category}
+                  </span>
+                  <span className={CONFIDENCE_STYLE[obs.confidence]}>
+                    {obs.content}
+                    {obs.confidence === 'low' && (
+                      <span className="ml-1 text-[10px] text-muted-foreground">（低置信度）</span>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground/60">
+            <span>
+              {extraction.extracted_at
+                ? `提取时间：${new Date(extraction.extracted_at).toLocaleString('zh-CN')}`
+                : ''}
+            </span>
+            <button
+              className="flex items-center gap-1 hover:text-muted-foreground"
+              onClick={onRefresh}
+            >
+              <RefreshCw className="h-2.5 w-2.5" />
+              刷新
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── 单条材料行 ───────────────────────────────────────── */
+
+function MaterialItem({ material, onDeleted, onRefresh }: {
+  material: SupplementalMaterial
+  onDeleted: () => void
+  onRefresh: () => void
+}) {
   const viewUrl = `/api/supplemental-materials/view?materialId=${material.id}`
   const isPdf = isPdfMaterial(material)
   const uploadedDate = material.uploaded_at
@@ -64,80 +192,84 @@ function MaterialItem({ material, onDeleted }: { material: SupplementalMaterial;
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-border/50 bg-white/70 px-3 py-2.5 dark:border-white/6 dark:bg-white/[0.03]">
-      {/* 缩略图 / 图标 */}
-      <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-border/40 bg-muted/30 dark:border-white/6">
-        {isPdf ? (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-0.5">
-            <FileText className="h-5 w-5 text-muted-foreground/60" />
-            <span className="text-[9px] font-medium text-muted-foreground/50">PDF</span>
-          </div>
-        ) : (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={viewUrl}
-              alt={material.title ?? '截图'}
-              className="h-full w-full object-cover"
-              loading="lazy"
-              onError={(e) => {
-                const target = e.currentTarget
-                target.style.display = 'none'
-                const parent = target.parentElement
-                if (parent) {
-                  const fallback = parent.querySelector('[data-fallback]') as HTMLElement | null
-                  if (fallback) fallback.style.display = 'flex'
-                }
-              }}
-            />
-            <div
-              data-fallback
-              className="absolute inset-0 hidden flex-col items-center justify-center gap-0.5"
-            >
-              <Image className="h-5 w-5 text-muted-foreground/50" />
+    <div className="rounded-xl border border-border/50 bg-white/70 px-3 py-2.5 dark:border-white/6 dark:bg-white/[0.03]">
+      {/* 顶行：缩略图 + 标题 + 操作按钮 */}
+      <div className="flex items-center gap-3">
+        {/* 缩略图 / 图标 */}
+        <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-border/40 bg-muted/30 dark:border-white/6">
+          {isPdf ? (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-0.5">
+              <FileText className="h-5 w-5 text-muted-foreground/60" />
+              <span className="text-[9px] font-medium text-muted-foreground/50">PDF</span>
             </div>
-          </>
-        )}
-      </div>
+          ) : (
+            <>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={viewUrl}
+                alt={material.title ?? '截图'}
+                className="h-full w-full object-cover"
+                loading="lazy"
+                onError={(e) => {
+                  const target = e.currentTarget
+                  target.style.display = 'none'
+                  const parent = target.parentElement
+                  if (parent) {
+                    const fallback = parent.querySelector('[data-fallback]') as HTMLElement | null
+                    if (fallback) fallback.style.display = 'flex'
+                  }
+                }}
+              />
+              <div
+                data-fallback
+                className="absolute inset-0 hidden flex-col items-center justify-center gap-0.5"
+              >
+                <Image className="h-5 w-5 text-muted-foreground/50" />
+              </div>
+            </>
+          )}
+        </div>
 
-      {/* 标题 + 日期 */}
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-medium text-foreground/85">
-          {material.title || (isPdf ? 'PDF 文件' : '截图')}
-        </p>
-        {uploadedDate && (
-          <p className="text-[10px] text-muted-foreground">{uploadedDate}</p>
-        )}
-      </div>
+        {/* 标题 + 日期 */}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-medium text-foreground/85">
+            {material.title || (isPdf ? 'PDF 文件' : '截图')}
+          </p>
+          {uploadedDate && (
+            <p className="text-[10px] text-muted-foreground">{uploadedDate}</p>
+          )}
+        </div>
 
-      {/* 查看 + 删除按钮 */}
-      <div className="flex shrink-0 items-center gap-1">
-        <a
-          href={viewUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Button variant="ghost" size="sm" className="h-7 rounded-lg px-2 text-[11px]">
-            <Eye className="mr-1 h-3 w-3" />
-            查看
+        {/* 查看 + 删除按钮 */}
+        <div className="flex shrink-0 items-center gap-1">
+          <a href={viewUrl} target="_blank" rel="noopener noreferrer">
+            <Button variant="ghost" size="sm" className="h-7 rounded-lg px-2 text-[11px]">
+              <Eye className="mr-1 h-3 w-3" />
+              查看
+            </Button>
+          </a>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={deleting}
+            onClick={handleDelete}
+            className="h-7 rounded-lg px-2 text-[11px] text-muted-foreground hover:text-red-500 dark:hover:text-red-400"
+          >
+            {deleting
+              ? <Loader2 className="h-3 w-3 animate-spin" />
+              : <Trash2 className="h-3 w-3" />
+            }
           </Button>
-        </a>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={deleting}
-          onClick={handleDelete}
-          className="h-7 rounded-lg px-2 text-[11px] text-muted-foreground hover:text-red-500 dark:hover:text-red-400"
-        >
-          {deleting
-            ? <Loader2 className="h-3 w-3 animate-spin" />
-            : <Trash2 className="h-3 w-3" />
-          }
-        </Button>
+        </div>
       </div>
+
+      {/* AI 提取结果 */}
+      <ExtractionPanel material={material} onRefresh={onRefresh} />
     </div>
   )
 }
+
+/* ── 主面板 ──────────────────────────────────────────── */
 
 export function DataImportPanel({ profileId, materials }: DataImportPanelProps) {
   const router = useRouter()
@@ -169,7 +301,7 @@ export function DataImportPanel({ profileId, materials }: DataImportPanelProps) 
         uploadedCount++
       }
 
-      toast.success(`已上传 ${uploadedCount} 个文件`)
+      toast.success(`已上传 ${uploadedCount} 个文件，AI 正在读取内容…`)
       router.refresh()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '上传失败')
@@ -219,9 +351,14 @@ export function DataImportPanel({ profileId, materials }: DataImportPanelProps) 
           <p className="mb-2 text-[11px] font-medium text-muted-foreground">
             PDF 文件 · {pdfMaterials.length} 份
           </p>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {pdfMaterials.map((m) => (
-              <MaterialItem key={m.id} material={m} onDeleted={() => router.refresh()} />
+              <MaterialItem
+                key={m.id}
+                material={m}
+                onDeleted={() => router.refresh()}
+                onRefresh={() => router.refresh()}
+              />
             ))}
           </div>
         </div>
@@ -233,9 +370,14 @@ export function DataImportPanel({ profileId, materials }: DataImportPanelProps) 
           <p className="mb-2 text-[11px] font-medium text-muted-foreground">
             截图 · {screenshotMaterials.length} 份
           </p>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {screenshotMaterials.map((m) => (
-              <MaterialItem key={m.id} material={m} onDeleted={() => router.refresh()} />
+              <MaterialItem
+                key={m.id}
+                material={m}
+                onDeleted={() => router.refresh()}
+                onRefresh={() => router.refresh()}
+              />
             ))}
           </div>
         </div>

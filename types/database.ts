@@ -1174,6 +1174,9 @@ export interface Database {
           description: string | null
           source: SupplementalMaterialSource
           uploaded_at: string
+          extraction_result: Record<string, unknown> | null
+          extracted_at: string | null
+          extraction_status: 'pending' | 'processing' | 'done' | 'failed' | null
         }
         Insert: {
           id?: string
@@ -1184,6 +1187,9 @@ export interface Database {
           description?: string | null
           source?: SupplementalMaterialSource
           uploaded_at?: string
+          extraction_result?: Record<string, unknown> | null
+          extracted_at?: string | null
+          extraction_status?: 'pending' | 'processing' | 'done' | 'failed' | null
         }
         Update: {
           id?: string
@@ -1194,6 +1200,9 @@ export interface Database {
           description?: string | null
           source?: SupplementalMaterialSource
           uploaded_at?: string
+          extraction_result?: Record<string, unknown> | null
+          extracted_at?: string | null
+          extraction_status?: 'pending' | 'processing' | 'done' | 'failed' | null
         }
         Relationships: []
       }
